@@ -1,0 +1,12 @@
+**/build/
+**/.gradle/
+**/local.properties
+**/*.aar
+**/*.wav
+**/*.opus
+adapter/received/
+**/__pycache__/
+.vendor/
+runtime/
+.venv/
+android/app/src/main/assets/sdk-credentials.json
