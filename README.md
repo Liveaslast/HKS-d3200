@@ -11,17 +11,42 @@
 
 ## 接口结论
 
-`harmonica-audio-eval` **有接口**，但要区分三层：
+`harmonica-audio-eval` **有接口**。从 App 到算法，接口分为下面三层：
 
-1. 对外输入参数实际是两份本地音频文件路径 `uri: str`，不是名为“WAV 接口”的
-   专用类型；文件由 `soundfile` 解码。当前联调统一使用 `reference.wav`、
-   `practice.wav`，以免把 D3200 的 raw Opus 误当作可直接解码的音频文件。
-2. Host 接口依次执行 `create_session`、`set_reference`、`set_practice`、
-   `build_surface`、`run_algorithms`、`build_view`。
-3. 算法本身不直接读取 WAV；Core 先把 WAV 转成 PCM 和 12 个数据端口，
-   Algorithms 再读取这些端口。
+### 1. App 交给算法工程什么？——两份音频的本地路径
 
-因此本工程没有改动算法工程的 Core、Ports 或 Algorithms，只增加
+App 不需要把整份 WAV 逐字节塞给算法，只要告诉算法两份文件在平板上的位置：
+
+- `reference.wav`：标准示范音频；
+- `practice.wav`：D3200 录到并完成解码的练习音频。
+
+接口参数名是 `uri: str`，意思就是“文件路径字符串”。算法工程使用 `soundfile`
+打开路径并读取音频。它并不按文件扩展名强制限定 WAV，但 D3200 下载得到的 raw
+Opus 没有标准音频封装，不能直接传入，所以双方统一用 WAV 交接最稳妥。
+
+### 2. Host 做什么？——负责按顺序组织一次完整分析
+
+Host 可以理解为算法工程的“总调度员”。App 把两份路径交给 Host 后，Host 负责：
+
+1. 创建本次分析任务（`create_session`）；
+2. 登记标准音频（`set_reference`）；
+3. 登记练习音频（`set_practice`）；
+4. 读取两份音频并准备算法数据（`build_surface`）；
+5. 运行音高、节奏和力度算法（`run_algorithms`）；
+6. 整理成 App 能显示的结果（`build_view`）。
+
+App 只调用这个流程，不需要分别调用每个音频算法。
+
+### 3. 算法真正读取什么？——Core 生成的标准数据
+
+音高、节奏和力度算法不会各自重复打开 WAV。Core 统一读取两份音频，把它们转换、
+对齐并整理成 PCM 波形及 12 类标准数据。Algorithms 只读取这些已经准备好的数据，
+最后产生分数、指标和曲线。
+
+因此职责关系是：**App 提供两份文件路径 → Host 调度流程 → Core 准备统一数据
+→ Algorithms 计算结果 → Host 把结果交回 App。**
+
+本工程据此没有改动算法工程的 Core、Ports 或 Algorithms，只增加
 `mobile_bridge.py`，在 Android 内按原有 Host 接口完成调用。
 
 ## 两种运行路径
