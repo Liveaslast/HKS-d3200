@@ -13,6 +13,7 @@ import android.widget.*
 import demo.d3200.audio.AudioPipeline
 import demo.d3200.device.SoundcoreDevice
 import demo.d3200.integration.AnalysisFacade
+import demo.d3200.integration.HttpAnalysisFacade
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -68,7 +69,7 @@ class MainActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD); setTextColor(Color.BLACK)
         })
         layout.addView(TextView(this).apply {
-            text = "A/B 验证录音豆到 WAV；C 验证 WAV 上传到队友 main.py。"
+            text = "A/B 验证录音豆到 WAV；C 在平板本地运行现有算法；D 保留 HTTP 诊断。"
             textSize = 15f; setPadding(0, 5, 0, 4)
         })
 
@@ -141,19 +142,34 @@ class MainActivity : Activity() {
             log("开始试听 ${file.name}")
         }
 
-        section("C · WAV 上传联调", "只测试 HTTP 接收，不运行算法；multipart 字段仍为 reference 和 practice。")
+        section("C · Android 本地算法", "通过 Chaquopy 调用 harmonica_eval 的 Host → Core/Ports → Algorithms。")
         button("选择 reference.wav") {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 type = "*/*"; addCategory(Intent.CATEGORY_OPENABLE)
             }, 10)
         }
+        button("在平板本地分析两段 WAV") {
+            val practiceFile = checkNotNull(practice) { "尚未生成或选择 practice.wav" }
+            check(reference.isFile) { "先选择 reference.wav" }
+            worker.execute {
+                log("本地分析开始；首次启动 Python 和构建 12 个端口可能较慢……")
+                try {
+                    val result = AnalysisFacade.analyze(applicationContext, reference, practiceFile)
+                    log("本地算法返回：\n${result.toString(2)}")
+                } catch (error: Exception) {
+                    log("本地分析失败：${error.stackTraceToString()}")
+                }
+            }
+        }
+
+        section("D · HTTP 诊断后备", "仅用于与电脑接收端对照；移动端正式链路不依赖此地址。")
         val endpoint = input("完整地址，例如 http://192.168.1.20:8000/upload-test")
         button("上传两段 WAV 并显示接收结果") {
             val practiceFile = checkNotNull(practice) { "尚未生成或选择 practice.wav" }
             check(reference.isFile) { "先选择 reference.wav" }
             val url = endpoint.text.toString().trim()
             worker.execute {
-                try { log("接口返回：\n${AnalysisFacade.analyze(url, reference, practiceFile).toString(2)}") }
+                try { log("接口返回：\n${HttpAnalysisFacade.analyze(url, reference, practiceFile).toString(2)}") }
                 catch (error: Exception) { log("上传失败：${error.message}") }
             }
         }
@@ -164,7 +180,7 @@ class MainActivity : Activity() {
             setPadding(16, 16, 16, 16); minHeight = 180
         }
         layout.addView(output)
-        log("调试台已启动。没有授权时可直接在 B/C 选择已有 WAV 测试上传。")
+        log("调试台已启动。没有 D3200 时可直接选择两份 WAV 测试 Android 本地算法。")
     }
 
     @Deprecated("Activity result compatibility")

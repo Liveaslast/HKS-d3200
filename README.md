@@ -1,139 +1,86 @@
 # D3200 Android 音频接入
 
-本工程负责把 Soundcore D3200 的录音接入 Android，并与
-[harmonica-audio-eval](https://github.com/jijiwu3526/harmonica-audio-eval) 对接。
+本工程负责把 Soundcore D3200 的录音送入 Android，并接入
+[harmonica-audio-eval](https://github.com/jijiwu3526/harmonica-audio-eval)。
 
-设备能力只使用 [Anker 官方 SoundcoreSDKDemo](https://github.com/AnkerInnovations/SoundcoreSDKDemo)
-提供的 Android SDK、AAR 与示例，不在算法工程中引入蓝牙、SDK 或 Opus 细节。
+完整链路：
 
-## 一、工程边界
+**D3200 → 官方 Soundcore Android SDK → raw Opus → PCM16 WAV（practice.wav）
+→ harmonica-audio-eval Host → Core / 12 个数据端口 / Algorithms → JSON
+→ Android UI**
 
-```text
-d3200-integration
-负责：D3200 → Android → Opus → PCM16 WAV → 分析入口
+## 接口结论
 
-harmonica-audio-eval
-负责：reference.wav + practice.wav → 音高/节奏/力度指标
-```
+`harmonica-audio-eval` **有接口**，但要区分三层：
 
-两个工程保持独立。本工程通过稳定的 WAV 输入边界调用算法，不修改
-`harmonica-audio-eval` 的 Core、Ports 与 Algorithms。
+1. 对外输入参数实际是两份本地音频文件路径 `uri: str`，不是名为“WAV 接口”的
+   专用类型；文件由 `soundfile` 解码。当前联调统一使用 `reference.wav`、
+   `practice.wav`，以免把 D3200 的 raw Opus 误当作可直接解码的音频文件。
+2. Host 接口依次执行 `create_session`、`set_reference`、`set_practice`、
+   `build_surface`、`run_algorithms`、`build_view`。
+3. 算法本身不直接读取 WAV；Core 先把 WAV 转成 PCM 和 12 个数据端口，
+   Algorithms 再读取这些端口。
 
-## 二、当前工作链
+因此本工程没有改动算法工程的 Core、Ports 或 Algorithms，只增加
+`mobile_bridge.py`，在 Android 内按原有 Host 接口完成调用。
 
-当前已经跑通的是电脑辅助链路：
+## 两种运行路径
 
-```text
-Android 选择 reference.wav 与 practice.wav
-        ↓ HTTP multipart/form-data
-adapter/main.py
-        ↓ 保存为电脑本地临时文件
-harmonica-audio-eval 的 Python CLI
-        ↓ metrics.json
-adapter/main.py 返回 JSON
-        ↓
-Android 显示结果
-```
+### 正式路径：Android 本地分析
 
-接口如下：
+`AnalysisFacade.kt` 通过 Chaquopy 调用 `mobile_bridge.py`，算法直接在平板运行，
+不需要电脑 IP、`main.py` 或局域网。
 
-```text
-POST /upload-test   只验证 WAV 上传、保存与格式，不运行算法
-POST /analyze       接收 WAV，调用电脑本地 harmonica-audio-eval
+### 诊断路径：HTTP
 
-multipart 字段：reference、practice
-```
+`HttpAnalysisFacade.kt` 仍可把两份 WAV 上传到 `adapter/main.py`，只用于比较、
+排错和旧流程兼容，不是正式部署依赖。
 
-这条链路用于联调，不是最终移动端部署。当前算法仍运行在电脑 Python 进程中。
+## 当前状态
 
-## 三、完整目标链
-
-最终验收目标是不依赖电脑和局域网服务：
-
-```text
-D3200
-  ↓ Anker Android SDK
-扫描、连接、开始/停止录音、下载录音
-  ↓
-fixed-frame raw Opus
-  ↓ 官方 opus-lib AAR
-PCM16
-  ↓ 写入 WAV
-practice.wav
-  ├──────── reference.wav
-  ↓
-Android 本地算法模块
-  ↓
-AnalysisResult
-  ↓
-Android UI
-```
-
-只有在平板断开电脑后仍能独立完成这条链，才算整体部署完成。
-
-## 四、Android 本地算法落地路径
-
-`harmonica-audio-eval` 当前是 Python 工程。仓库中的 Web UI 可以被手机浏览器访问，
-但计算仍发生在电脑上，不等于算法已部署到 Android。
-
-移动端落地需要按以下顺序完成：
-
-```text
-1. 冻结输入输出
-   analyze(reference.wav, practice.wav) → AnalysisResult
-
-2. 保留现有算法结构
-   Host → Core/Ports → Algorithms
-
-3. 替换桌面依赖
-   soundfile/librosa/命令行入口 → Android 音频读取与移动端实现
-
-4. 形成 Android 可调用模块
-   Kotlin/C++/JNI，或经验证可用的 Android Python 运行时
-
-5. 数值对拍
-   同一组 WAV 分别在 Python 与 Android 运行，逐项比较指标和错误行为
-
-6. 接入 App
-   Opus → WAV → 本地 analyze() → UI
-```
-
-技术路线需由 Android 与算法实现共同确定。在完成真机打包和数值对拍前，
-“架构可移植”不能写成“已经在移动端运行”。
-
-## 五、当前状态
-
-| 环节 | 状态 |
+| 链路 | 状态 |
 |---|---|
-| Android 调试 App 构建、安装和文件选择 | 已验证 |
-| Android 上传两份 WAV 到 `/upload-test` | 已验证 |
-| `main.py` 调用电脑本地算法并返回 JSON | 已验证 |
-| 官方 Soundcore SDK/AAR 接入代码 | 已准备，待正式凭据与真机验证 |
-| D3200 扫描、连接、录音和文件下载 | 未验证 |
-| 真实 D3200 raw Opus → 可播放 WAV | 未验证 |
-| `harmonica-audio-eval` 在 Android 本地运行 | 未实现 |
-| 断开电脑后的完整闭环 | 未实现 |
+| 选择两份 WAV 并上传到电脑 HTTP 接收端 | 已验证 |
+| `mobile_bridge.py` 调用完整 Host/Algorithms | 已在 Windows Python 验证 |
+| 上游 Android 探针构建 12/12 数据端口 | 上游已在 Pixel 7 验证 |
+| 本工程 APK 内运行完整算法并返回 JSON | 已在联想平板验证 |
+| 官方 Soundcore SDK 初始化与接口封装 | 已准备，待正式凭据 |
+| 真实 D3200 录音下载与 raw Opus 参数确认 | 待设备 |
+| 真实 raw Opus → 可播放 WAV | 待设备 |
 
-当前结论：**WAV 上传与电脑算法接入已经跑通；真实 D3200 音频链路和 Android 本地算法部署尚未完成。**
+## 目录
 
-## 六、代码位置
+| 位置 | 任务 |
+|---|---|
+| **android/app/src/main/java/demo/d3200/device/** | 官方 SDK：初始化、连接、录音、下载 |
+| **android/app/src/main/java/demo/d3200/audio/** | Opus 解码、PCM16 与 WAV |
+| **android/app/src/main/java/demo/d3200/integration/** | Android 本地算法入口与 HTTP 诊断入口 |
+| **android/app/src/main/java/demo/d3200/ui/** | 真机调试界面 |
+| **android/app/src/main/python/mobile_bridge.py** | 原有 Host 接口的 Android 调用桥 |
+| **adapter/main.py** | 可选的电脑 HTTP 诊断服务 |
 
-```text
-android/app/src/main/java/demo/d3200/
-├── device/       官方 SDK：初始化、扫描、连接、录音、下载
-├── audio/        opus-lib 解码与 PCM16 WAV 写入
-├── integration/ 当前 HTTP 对接层；本地算法完成后由本地调用替代
-└── ui/           真机联调界面
+## 调试界面
 
-adapter/
-├── main.py       电脑辅助模式的 HTTP 接收与算法调用
-└── test_server.py
-```
+调试 App 按链路分为四区：
 
-## 七、下一步
+| 区域 | 用途 | 当前怎么用 |
+|---|---|---|
+| A · 设备与录音 | SDK 初始化、扫描、连接、录音和下载 | 等 D3200 与正式授权后验证 |
+| B · Opus → WAV | 导入 raw Opus、填写已确认的音频参数并生成 `practice.wav` | 无设备时可直接选择已有 `practice.wav`；不要猜 raw Opus 参数 |
+| C · Android 本地算法 | 选择 `reference.wav`，把它和 `practice.wav` 交给本地算法 | 已在联想平板跑通，是当前正式分析入口 |
+| D · HTTP 诊断后备 | 把两份 WAV 发给电脑端 `main.py` | 只在排错或对照时使用，正式链路不需要 |
 
-1. 取得 D3200 与正式 SDK 凭据，跑通录音文件下载。
-2. 用真实 raw Opus 验证采样率、声道、帧长、解码返回计数及 WAV 时长。
-3. 确定 `harmonica-audio-eval` 的 Android 实现路线。
-4. 完成 Android 本地算法模块与 Python 基准对拍。
-5. 移除对 `main.py`、电脑 IP 和局域网的运行依赖，完成独立真机验收。
+底部“运行日志”用于查看 SDK 回调、文件路径、转码状态与算法 JSON。现阶段正常
+验证顺序是：在 B 选择 `practice.wav` → 在 C 选择 `reference.wav` → 点击本地分析。
+
+## 本机首次构建
+
+Android 构建期需要 Python 3.10。在 `android/local.properties` 中保留 Android
+SDK 路径，并按本机位置增加：
+
+- **Python 3.10 路径：** python310.path = D:\Anaconda\envs\harmonica-android-build\python.exe
+- **算法工程路径：** harmonica.repo = D:\Agent_Work\video\harmonica-audio-eval
+
+然后在 `android` 目录构建 `assembleDebug`。本工程已在联想平板使用两份现成
+WAV 得到包含 `ok`、`scalars`、`series` 的 JSON，Android 本地算法链已经完成
+验证。D3200 链路仍需等设备与正式授权后单独验收。

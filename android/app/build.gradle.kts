@@ -1,7 +1,20 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.chaquopy)
 }
+
+val localProperties = Properties().apply {
+    val source = rootProject.file("local.properties")
+    if (source.isFile) source.inputStream().use(::load)
+}
+val algorithmRepo = file(
+    localProperties.getProperty("harmonica.repo")
+        ?: rootProject.file("../../harmonica-audio-eval").canonicalPath
+).canonicalFile
+val python310 = localProperties.getProperty("python310.path")
 
 android {
     namespace = "demo.d3200"
@@ -9,12 +22,13 @@ android {
 
     defaultConfig {
         applicationId = "demo.d3200"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk { abiFilters += "arm64-v8a" }
     }
 
 
@@ -45,6 +59,30 @@ android {
 
     kotlinOptions {
         jvmTarget = "11"
+    }
+
+    sourceSets["main"].jniLibs.srcDir(algorithmRepo.resolve("android/app/src/main/jniLibs"))
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.10"
+        if (!python310.isNullOrBlank()) buildPython(python310)
+        pip {
+            install("numpy==1.26.2")
+            install("soundfile==0.13.1")
+            install("chaquopy-openblas")
+            install("chaquopy-libgfortran")
+            install("scipy")
+            install("cffi")
+            install("chaquopy-libffi")
+            install("chaquopy-libsndfile")
+            install("chaquopy-flac")
+            install("chaquopy-libogg")
+            install("chaquopy-libvorbis")
+            options("--no-deps")
+            install("harmonica-eval @ ${algorithmRepo.toURI()}")
+        }
     }
 }
 
