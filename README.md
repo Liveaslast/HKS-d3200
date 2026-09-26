@@ -73,14 +73,20 @@
 底部“运行日志”用于查看 SDK 回调、文件路径、转码状态与算法 JSON。现阶段正常
 验证顺序是：在 B 选择 `practice.wav` → 在 C 选择 `reference.wav` → 点击本地分析。
 
-## 本机首次构建
+## 开发者重新编译 APK（普通使用可跳过）
 
-Android 构建期需要 Python 3.10。在 `android/local.properties` 中保留 Android
-SDK 路径，并按本机位置增加：
+本节只供需要修改源码并重新生成 APK 的开发者使用。Python 3.10 和算法工程路径
+只在电脑打包 APK 时使用；它们的运行组件随后会被装进 APK。已经安装 APK 的平板
+可以独立运行算法，不需要连接电脑，也不需要在平板安装 Python。
+
+首次在一台新电脑编译时，在 `android/local.properties` 中保留 Android SDK 路径，
+并按该电脑的实际位置增加：
 
 - **Python 3.10 路径：** python310.path = D:\Anaconda\envs\harmonica-android-build\python.exe
 - **算法工程路径：** harmonica.repo = D:\Agent_Work\video\harmonica-audio-eval
 
-然后在 `android` 目录构建 `assembleDebug`。本工程已在联想平板使用两份现成
-WAV 得到包含 `ok`、`scalars`、`series` 的 JSON，Android 本地算法链已经完成
-验证。D3200 链路仍需等设备与正式授权后单独验收。
+然后在 `android` 目录执行 `assembleDebug` 生成 APK。普通使用者拿到 APK 后只需
+安装，不必重复这一过程。
+
+本工程已在联想平板使用两份现成 WAV 得到包含 `ok`、`scalars`、`series` 的
+JSON，Android 本地算法链已经完成验证。D3200 链路仍需等设备与正式授权后单独验收。
