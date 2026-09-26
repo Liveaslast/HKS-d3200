@@ -1,8 +1,49 @@
-# D3200 → WAV → 现有算法入口
+# D3200 移动端音频接入工程
 
 这是独立的外围接入工程，不是对 harmonica-audio-eval 内核的改造。
-目标：真实录音豆采集 → 可播放且时长正确的 WAV → 两个文件进入现有 CLI → 原有指标返回。
-当前状态：接入代码与调试台已创建；未经 Android 编译和 D3200 真机验证，不能称为已经跑通。
+最终目标：真实录音豆采集 → 可播放且时长正确的 WAV → **算法在移动端本机运行** → UI 显示结果。
+
+> **当前结论：整体项目尚未成功。** 已跑通的是“Android 上传 WAV → 电脑 `main.py` →
+> 电脑本地算法 → JSON 返回”的**电脑辅助联调链路**。真实 D3200 的 Opus 转 WAV 尚未真机验证，
+> `harmonica-audio-eval` 也尚未部署到 Android；只要分析仍依赖电脑，本项目就不满足最终成功标准。
+
+## 当前完成度
+
+| 链路 | 状态 | 已有证据／缺口 |
+|---|---|---|
+| Android 调试 App 构建、安装、启动 | ✅ 已验证 | 已在 Lenovo TB375FC / Android 16 打开并操作 |
+| Android 选择 reference/practice WAV | ✅ 已验证 | 两份 WAV 均能导入 App |
+| Android → `main.py /upload-test` | ✅ 已验证 | HTTP 返回 `ok: true`；电脑保存并校验两份 PCM16 WAV |
+| `main.py /analyze` → 本地算法 CLI | ✅ 已验证 | 真实 HTTP POST 返回 200；算法产出指标 JSON |
+| 官方 SDK/AAR 接入代码与 Opus 解码代码 | 🟡 已准备 | 来自固定版本的 Anker 官方 Demo，但没有正式 License 与真机音频 |
+| D3200 扫描、连接、开始录音、下载文件 | ❌ 未验证 | 缺录音豆与正式 SDK 凭据 |
+| D3200 真实 raw Opus → 可播放 WAV | ❌ 未验证 | 缺真机生成的 raw Opus；不能用普通 Ogg Opus 代替 |
+| 算法直接在 Android 本机运行 | ❌ 未实现 | 现有实现为 Python + NumPy/SciPy/librosa/soundfile；没有 Android 算法模块/AAR/JNI |
+| 脱离电脑完成录音、分析和显示 | ❌ 未实现 | 当前 `/analyze` 必须依赖电脑 Python 进程 |
+
+### 两种“跑通”不能混为一谈
+
+当前已经跑通的是：
+
+```text
+Android 选择测试 WAV
+        ↓ HTTP
+电脑 adapter/main.py
+        ↓ 子进程
+电脑 harmonica-audio-eval
+        ↓ JSON
+Android
+```
+
+最终才算成功的是：
+
+```text
+D3200 → Android 官方 SDK → raw Opus → PCM16 WAV
+      → Android 本地算法 → AnalysisResult → Android UI
+```
+
+最终链路中不应要求现场电脑、局域网 HTTP 服务或电脑 Python 环境。若团队最终裁定使用云端算法，
+那是另一种产品方案，必须重新定义成功标准；本 README 当前按“算法落在移动端”验收。
 
 ## 文件地图
 
@@ -12,9 +53,9 @@
 | 手机 device/ | OfficialBusinessCallback.kt | 按官方 Demo 的真实签名适配业务回调 |
 | 手机 audio/ | OpusDecoder.kt | 调用官方 opus-lib AAR 的解码器 |
 | 手机 audio/ | AudioPipeline.kt | 固定帧 raw Opus 文件转 PCM16 WAV；不解析任意 BLE 分片或 Ogg |
-| 手机 integration/ | AnalysisFacade.kt | 按队友合同上传 reference/practice，接收 JSON |
+| 手机 integration/ | AnalysisFacade.kt | 当前电脑辅助模式：按合同上传 reference/practice，接收 JSON |
 | 手机 ui/ | MainActivity.kt | 临时接入调试台，交接后可由队友 App 替换 |
-| 电脑 adapter/ | main.py | 合并接口队友原型：接收文件、落盘并调用现有 CLI |
+| 电脑 adapter/ | main.py | 电脑辅助联调接头：接收文件、落盘并调用现有 CLI；最终移动端本地方案不需要它 |
 | 电脑 adapter/ | test_server.py | 格式、传输、路径隔离和返回合同测试，不冒充算法实测 |
 
 手机源码位于 android/app/src/main/java/demo/d3200/。
@@ -53,7 +94,7 @@ SDK 凭据放 assets 仅用于受控本地 Demo，不适合正式发布 APK。
 手机 WAV 保存在 App 私有 files/ 中，可通过 Android Studio Device Explorer 导出。实时接口目前只预留请求，不宣称已完成实时 PCM 流或丢包补偿。
 Opus native decode 返回的是每声道采样数还是总交错采样数，必须核对 AAR/真机；界面显式选择，禁止猜测。16k 重采样到44.1k不会恢复高频信息，真实口琴音高表现由算法队友一起验证。
 
-## 第三步：先手动调用，不急着联网
+## 第三步：电脑辅助联调（过渡方案，不是最终部署）
 
 把 reference.wav 与 practice.wav 放到电脑，在队友工程根目录执行：
 
@@ -63,7 +104,7 @@ python -m harmonica_eval --reference reference.wav --practice practice.wav --out
 
 这是队友已有入口，不修改内部代码。检查原有 state、scalars、series、null 和错误。合成音频测试通过不等于 D3200 通过。
 
-## 第四步：自动上传（电脑外围服务）
+## 第四步：自动上传（电脑外围服务，过渡方案）
 
 使用能够运行队友框架的同一个 Python 环境安装 adapter/requirements.txt 中的外围依赖；不要改队友 requirements/冻结契约。
 
@@ -89,15 +130,33 @@ PCM16 WAV、保存到 `adapter/received/<request_id>/`，并返回大小、时�
 ## 测试与尚未完成
 
 电脑传输测试（额外安装 httpx==0.28.1）：在 adapter/ 执行 `python -m unittest -v test_server`。
-Android 构建、官方 AAR 真机初始化、绑定、录音文件结束语义、实际 Opus 格式、试听与真实分析均需要独立验证。
-完整验收是“真实设备音频进入现有框架并得到有效指标”，不是“目录和接口已生成”。
+Android 最新源码仍需每次改动后重新安装回归。官方 AAR 真机初始化、绑定、录音文件结束语义、
+实际 Opus 格式和真实录音试听均需要独立验证。
+
+### 接下来必须完成
+
+1. **D3200 真机链路**：取得设备、正式 License/凭据，验证扫描、连接、录音、文件列表和下载回调。
+2. **真实 Opus 规格**：确认下载文件确为官方 fixed-frame raw Opus，并核对 16000 Hz、2 声道、
+   160 字节帧和解码返回计数；生成 WAV 后试听、核对时长与文件头。
+3. **Android 本地算法技术选型**：由算法与移动端负责人共同决定 Kotlin/C++ 重写、JNI，或受控的
+   Android Python 运行时；不能把“源码理论可移植”写成“已经部署”。
+4. **移动端算法移植与对拍**：在 Android 上实现音频读取、重采样、特征、对齐和指标，使用同一组
+   WAV 与电脑 Python 基准逐项比较数值和错误行为。
+5. **最终整合**：删除对电脑 IP、`main.py` 和局域网的强依赖，实现 D3200 → WAV → 本地分析 → UI。
+6. **真机验收**：断开电脑和开发网络，在平板上独立完成一次完整录音、分析与结果展示。
+
+在第 1～6 项完成前，只能称为“外围接口和电脑辅助 Demo 已部分跑通”。
 
 ### 本次实际检查（2026-09-26）
 
 - setup-official-sdk.ps1 使用已有官方检出运行成功，两个 AAR 已放入本地 android/app/libs/，来源提交及哈希已核对。
-- 电脑接头的4项 unittest 全部通过：时长限制、截断数据、分析入口合同，以及不调用算法的纯上传入口。
-- Android assembleDebug 已尝试，因没有 JAVA_HOME/java 而失败；尚未进入 Kotlin 编译阶段，因此 API 编译兼容性未验证。
-- 没有录音豆、正式授权与真实参考录音；没有执行真实设备录音、解码和算法端到端验收。
+- 电脑接头的 4 项 unittest 全部通过：时长限制、截断数据、分析入口合同，以及不调用算法的纯上传入口。
+- 用户已在 Android 16 平板安装并打开调试 App，成功导入两份测试 WAV，并通过 `/upload-test` 上传。
+- 已向真实运行的 `/analyze` 发送两份 WAV；HTTP 200，`main.py` 成功调用本地
+  `harmonica-audio-eval` 并返回 pitch/rhythm/dynamics JSON。
+- 上述成功只证明电脑辅助模式；没有录音豆、正式授权和真实 D3200 raw Opus。
+- 队友算法仓库包含手机可访问的 Web UI，但计算仍在电脑 Python 进程；没有 Android 本地算法部署。
 - 队友仓库本次没有修改，也没有推送 GitHub。
 
-先补齐 Android Studio/JDK 与正式 SDK 授权，再做真机验收。调试台中的参数确认不是替代实测的办法。
+下一优先级不是继续美化 HTTP Demo，而是取得 D3200 完成真实 Opus → WAV 验收，并由团队明确 Android
+本地算法移植的负责人和技术路线。调试台中的参数确认不能替代真机实测。
